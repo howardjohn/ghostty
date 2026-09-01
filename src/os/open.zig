@@ -84,12 +84,23 @@ test "macOS OSC 8 links have no generic opener fallback" {
 pub fn exec(
     path: []const u8,
     filename: []const u8,
+    cwd: ?[]const u8,
 ) !void {
-    var spawn_opts: std.process.SpawnOptions = .{ .argv = &.{ path, filename } };
+    var environ_map = try global.environMap();
+    defer environ_map.deinit();
+    if (cwd) |value| {
+        try environ_map.put("PWD", value);
+    }
 
-    // Pipe stdout/stderr so we can collect output from the command.
-    // This must be set before spawning the process.
-    spawn_opts.stdout = .pipe;
+    var spawn_opts: std.process.SpawnOptions = .{
+        .argv = &.{ path, filename },
+        .cwd = if (cwd) |value| .{ .path = value } else .inherit,
+        .environ_map = &environ_map,
+    };
+
+    // Ignore stdout and pipe stderr so we can report useful diagnostics.
+    // These must be set before spawning the process.
+    spawn_opts.stdout = .ignore;
     spawn_opts.stderr = .pipe;
 
     const exe = try std.process.spawn(global.io(), spawn_opts);
@@ -120,7 +131,8 @@ fn openThread(io: std.Io, exe_: std.process.Child) void {
                     error.EndOfStream => break,
                 },
             };
-            log.warn("open stderr={s}", .{line});
+            const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+            if (trimmed.len > 0) log.warn("open stderr={s}", .{trimmed});
         }
     }
     _ = exe.wait(io) catch {};

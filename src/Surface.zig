@@ -4436,6 +4436,7 @@ fn processLinks(self: *Surface, pos: apprt.CursorPos) !bool {
             try internal_os.exec(
                 link.action.exec,
                 str,
+                self.io.terminal.getPwd(),
             );
         },
 
