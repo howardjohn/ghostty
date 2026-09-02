@@ -4323,7 +4323,7 @@ fn linkAtPos(
 
     // If we have the proper modifiers set then we can check for OSC8 links.
     if (self.config.link_osc8 and
-        mouse_mods.equal(input.ctrlOrSuper(.{})))
+        mouse_mods.equal(.{ .shift = true }))
     hyperlink: {
         const rac = mouse_pin.rowAndCell();
         const cell = rac.cell;

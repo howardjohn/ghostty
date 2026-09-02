@@ -1460,9 +1460,8 @@ scrollbar: Scrollbar = .system,
 /// exists. This can be disabled using `link-url`.
 link: RepeatableLink = .{},
 
-/// Enable URL matching. URLs are matched on hover with control (Linux) or
-/// command (macOS) pressed and open using the default system application for
-/// the linked URL.
+/// Enable URL matching. URLs are matched on hover with shift pressed and open
+/// using the default system application for the linked URL.
 ///
 /// The URL matcher is always lowest priority of any configured links (see
 /// `link`). If you want to customize URL matching, use `link` and disable this.
@@ -4000,7 +3999,7 @@ pub fn default(alloc_gpa: Allocator) Allocator.Error!Config {
     try result.link.links.append(alloc, .{
         .regex = url.regex,
         .action = .{ .open = {} },
-        .highlight = .{ .hover_mods = inputpkg.ctrlOrSuper(.{}) },
+        .highlight = .{ .hover_mods = .{ .shift = true } },
     });
 
     return result;
@@ -8695,7 +8694,7 @@ pub const RepeatableLink = struct {
             try self.links.append(alloc, .{
                 .regex = try alloc.dupeZ(u8, pattern),
                 .action = .{ .exec = try alloc.dupeZ(u8, execPath) },
-                .highlight = .{ .hover_mods = inputpkg.ctrlOrSuper(.{}) },
+                .highlight = .{ .hover_mods = .{ .shift = true } },
             });
             return;
         }
@@ -8710,7 +8709,7 @@ pub const RepeatableLink = struct {
         try self.links.append(alloc, .{
             .regex = try alloc.dupeZ(u8, pattern),
             .action = action,
-            .highlight = .{ .hover_mods = inputpkg.ctrlOrSuper(.{}) },
+            .highlight = .{ .hover_mods = .{ .shift = true } },
         });
     }
 
