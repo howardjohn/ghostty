@@ -336,6 +336,7 @@ const DerivedConfig = struct {
     title_report: bool,
     links: []DerivedConfig.Link,
     link_osc8: bool,
+    link_osc8_file_action: configpkg.OSC8FileAction,
     link_previews: configpkg.LinkPreviews,
     scroll_to_bottom: configpkg.Config.ScrollToBottom,
     notify_on_command_finish: configpkg.Config.NotifyOnCommandFinish,
@@ -416,6 +417,7 @@ const DerivedConfig = struct {
             .title_report = config.@"title-report",
             .links = links,
             .link_osc8 = config.@"link-osc8",
+            .link_osc8_file_action = config.@"link-osc8-file-action",
             .link_previews = config.@"link-previews",
             .scroll_to_bottom = config.@"scroll-to-bottom",
             .notify_on_command_finish = config.@"notify-on-command-finish",
@@ -1640,21 +1642,36 @@ fn mouseRefreshLinks(
                     .sel = link.selection,
                     .trim = false,
                 });
+                const preview_text = switch (link.action) {
+                    .open => try std.fmt.allocPrintSentinel(alloc, "open: {s}", .{str}, 0),
+                    .copy_to_clipboard => try std.fmt.allocPrintSentinel(alloc, "copy: {s}", .{str}, 0),
+                    .exec => |path| try std.fmt.allocPrintSentinel(alloc, "{s}: {s}", .{ std.fs.path.basename(path), str }, 0),
+                    ._open_osc8 => unreachable,
+                };
                 break :link .{
-                    .{ .url = str },
+                    .{ .url = preview_text },
                     self.config.link_previews == .true,
                 };
             },
 
             ._open_osc8 => {
-                // Show the URL in the status bar
+                // Describe the same action and target used by processLinks.
                 const pin = link.selection.start();
                 const uri = self.osc8URI(pin) orelse {
                     log.warn("failed to get URI for OSC8 hyperlink", .{});
                     break :link .{ null, false };
                 };
+                if (self.config.link_osc8_file_action == .copy) {
+                    const path_buf = try alloc.alloc(u8, uri.len);
+                    if (try internal_os.uri.filePath(uri, path_buf)) |path| {
+                        break :link .{
+                            .{ .url = try std.fmt.allocPrintSentinel(alloc, "copy: {s}", .{path}, 0) },
+                            self.config.link_previews != .false,
+                        };
+                    }
+                }
                 break :link .{
-                    .{ .url = try alloc.dupeZ(u8, uri) },
+                    .{ .url = try std.fmt.allocPrintSentinel(alloc, "open: {s}", .{uri}, 0) },
                     self.config.link_previews != .false,
                 };
             },
@@ -4460,6 +4477,24 @@ fn processLinks(self: *Surface, pos: apprt.CursorPos) !bool {
                 log.warn("failed to get URI for OSC8 hyperlink", .{});
                 return false;
             };
+
+            if (self.config.link_osc8_file_action == .copy) {
+                const path_buf = try self.alloc.alloc(u8, uri.len);
+                defer self.alloc.free(path_buf);
+                if (try internal_os.uri.filePath(uri, path_buf)) |path| {
+                    const path_z = try self.alloc.dupeZ(u8, path);
+                    defer self.alloc.free(path_z);
+                    self.rt_surface.setClipboard(.standard, &.{.{
+                        .mime = "text/plain",
+                        .data = path_z,
+                    }}, false) catch |err| {
+                        log.err("error copying OSC8 file path to clipboard err={}", .{err});
+                        return false;
+                    };
+                    return true;
+                }
+            }
+
             try self.openUrl(.{ .kind = .osc8, .url = uri });
         },
     }

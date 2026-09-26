@@ -90,6 +90,30 @@ pub fn parse(text: []const u8, options: ParseOptions) ParseError!std.Uri {
     return uri;
 }
 
+/// Returns the decoded path from a file URI, or null if `text` is not a valid
+/// file URI. The returned slice points into `buffer` or `text`.
+pub fn filePath(text: []const u8, buffer: []u8) error{NoSpaceLeft}!?[]const u8 {
+    const uri = parse(text, .{}) catch return null;
+    if (!std.ascii.eqlIgnoreCase(uri.scheme, "file")) return null;
+    return try uri.path.toRaw(buffer);
+}
+
+test "filePath" {
+    const testing = std.testing;
+    var buf: [256]u8 = undefined;
+
+    try testing.expectEqualStrings(
+        "/tmp/hello world.txt",
+        (try filePath("file:///tmp/hello%20world.txt", &buf)).?,
+    );
+    try testing.expectEqualStrings(
+        "/tmp/file",
+        (try filePath("FILE://localhost/tmp/file?ignored=yes#fragment", &buf)).?,
+    );
+    try testing.expectEqual(null, try filePath("https://example.com/file", &buf));
+    try testing.expectEqual(null, try filePath("file://[", &buf));
+}
+
 test "parse: mac_address" {
     const testing = @import("std").testing;
 

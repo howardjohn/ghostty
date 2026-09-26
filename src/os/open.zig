@@ -123,17 +123,38 @@ fn openThread(io: std.Io, exe_: std.process.Child) void {
         var stream = stderr.readerStreaming(io, &buffer);
         const reader = &stream.interface;
         while (true) {
-            const line = reader.takeDelimiterExclusive('\n') catch |outer| switch (outer) {
-                error.EndOfStream => break,
-                error.ReadFailed => break,
-                error.StreamTooLong => reader.take(buffer.len) catch |inner| switch (inner) {
-                    error.ReadFailed => break,
-                    error.EndOfStream => break,
-                },
-            };
+            const line = (readStderrChunk(reader) catch break) orelse break;
             const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
             if (trimmed.len > 0) log.warn("open stderr={s}", .{trimmed});
         }
     }
     _ = exe.wait(io) catch {};
+}
+
+/// Consume the newline as well as the line, otherwise the next read returns
+/// an empty slice forever. Drain long lines in buffer-sized chunks.
+fn readStderrChunk(reader: *std.Io.Reader) error{ReadFailed}!?[]const u8 {
+    return reader.takeDelimiter('\n') catch |err| switch (err) {
+        error.ReadFailed => return error.ReadFailed,
+        error.StreamTooLong => reader.take(reader.buffer.len) catch |inner| switch (inner) {
+            error.ReadFailed => return error.ReadFailed,
+            error.EndOfStream => return null,
+        },
+    };
+}
+
+test "open stderr consumes newlines and reaches EOF" {
+    var reader = std.Io.Reader.fixed("warning\n\nnext\nunterminated");
+    for ([_][]const u8{ "warning", "", "next", "unterminated" }) |expected| {
+        const chunk = (try readStderrChunk(&reader)) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqualStrings(expected, chunk);
+    }
+    try std.testing.expectEqual(null, try readStderrChunk(&reader));
+    try std.testing.expectEqual(null, try readStderrChunk(&reader));
+
+    var empty = std.Io.Reader.fixed("");
+    try std.testing.expectEqual(null, try readStderrChunk(&empty));
+    var newline = std.Io.Reader.fixed("\n");
+    try std.testing.expectEqualStrings("", (try readStderrChunk(&newline)).?);
+    try std.testing.expectEqual(null, try readStderrChunk(&newline));
 }

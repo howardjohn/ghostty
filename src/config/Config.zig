@@ -1475,6 +1475,16 @@ link: RepeatableLink = .{},
 /// Available since: 1.4.0
 @"link-osc8": bool = true,
 
+/// Controls what happens when an OSC 8 hyperlink targets a `file://` URI.
+/// This only changes the click action; highlighting and link previews are
+/// unaffected. Non-file OSC 8 hyperlinks always open normally.
+///
+/// Valid values are:
+///
+///   * `open` - Open the URI using the system handler. This is the default.
+///   * `copy` - Copy the URI's decoded file path to the system clipboard.
+@"link-osc8-file-action": OSC8FileAction = .open,
+
 /// Show link previews for a matched URL.
 ///
 /// When true, link previews are shown for all matched URLs. When false, link
@@ -4842,9 +4852,8 @@ pub fn finalize(self: *Config) !void {
     if (self.@"window-width" > 0) self.@"window-width" = @max(10, self.@"window-width");
     if (self.@"window-height" > 0) self.@"window-height" = @max(4, self.@"window-height");
 
-    // If URLs are disabled, cut off the first link. The first link is
-    // always the URL matcher.
-    if (!self.@"link-url") self.link.links.items = self.link.links.items[1..];
+    // Custom rules take precedence over the built-in URL/path matcher.
+    self.link.finalizeDefault(self.@"link-url");
 
     // We warn when the quit-after-last-window-closed-delay is set to a very
     // short value because it can cause Ghostty to quit before the first
@@ -5445,6 +5454,11 @@ pub const LinkPreviews = enum {
     false,
     true,
     osc8,
+};
+
+pub const OSC8FileAction = enum {
+    open,
+    copy,
 };
 
 /// See working-directory
@@ -8679,6 +8693,35 @@ pub const RepeatableLink = struct {
 
     links: std.ArrayList(inputpkg.Link) = .empty,
 
+    fn finalizeDefault(self: *Self, enabled: bool) void {
+        for (self.links.items, 0..) |item, i| {
+            if (!std.mem.eql(u8, item.regex, url.regex)) continue;
+            const default_link = self.links.orderedRemove(i);
+            if (enabled) self.links.appendAssumeCapacity(default_link);
+            return;
+        }
+    }
+
+    test "link custom rules precede default matcher" {
+        var cfg = try Config.default(std.testing.allocator);
+        defer cfg.deinit();
+        const alloc = cfg._arena.?.allocator();
+        try cfg.link.parseCLI(alloc, "exec:/bin/editor=editor-pattern");
+        try cfg.link.parseCLI(alloc, "copy_to_clipboard=copy-pattern");
+        for (0..2) |_| {
+            cfg.link.finalizeDefault(true);
+            try std.testing.expectEqualStrings("editor-pattern", cfg.link.links.items[0].regex);
+            try std.testing.expectEqualStrings("copy-pattern", cfg.link.links.items[1].regex);
+            try std.testing.expectEqualStrings(url.regex, cfg.link.links.items[2].regex);
+        }
+        for (0..2) |_| {
+            cfg.link.finalizeDefault(false);
+            try std.testing.expectEqual(@as(usize, 2), cfg.link.links.items.len);
+            try std.testing.expectEqualStrings("editor-pattern", cfg.link.links.items[0].regex);
+            try std.testing.expectEqualStrings("copy-pattern", cfg.link.links.items[1].regex);
+        }
+    }
+
     pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
         const input = input_ orelse return error.ValueRequired;
         if (input.len == 0) return error.ValueRequired;
@@ -8745,9 +8788,9 @@ pub const RepeatableLink = struct {
 
     /// Used by Formatter
     pub fn formatEntry(self: Self, formatter: formatterpkg.EntryFormatter) !void {
-        for (0.., self.links.items) |i, *item| {
+        for (self.links.items) |*item| {
             // Don't display the default link
-            if (i > 0 or !std.mem.eql(u8, item.regex, url.regex)) {
+            if (!std.mem.eql(u8, item.regex, url.regex)) {
                 try formatter.formatEntry([]const u8, item.regex);
             }
         }
